@@ -1,0 +1,12 @@
+filters:
+  and:
+    - type == "note"
+views:
+  - type: table
+    name: Table
+    order:
+      - file.name
+      - file.tags
+    sort:
+      - property: file.name
+        direction: ASC
