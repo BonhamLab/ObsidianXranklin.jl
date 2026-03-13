@@ -13,14 +13,18 @@ function transform_wikilinks(content::String, note_index::Dict, output_dir::Stri
     content = replace(content, r"!\[\[([^\]\|]+\.(png|jpg|jpeg|gif|svg|webp|pdf))\]\]"i =>
         function(m)
             img = match(r"!\[\[([^\]]+)\]\]", m).captures[1]
-            "![$(basename(img))](/_assets/$(basename(img)))"
+            name = basename(img)
+            safe_name = replace(name, " " => "-")
+            "![$name](/assets/$safe_name)"
         end
     )
 
     # Note embeds: ![[note name]] → inline link (full embed requires server-side processing)
+    # .base files are skipped here — handled later by process_base_embeds
     content = replace(content, r"!\[\[([^\]]+)\]\]" =>
         function(m)
             raw = match(r"!\[\[([^\]]+)\]\]", m).captures[1]
+            endswith(lowercase(raw), ".base") && return m
             note_name = strip(split(raw, "#")[1])
             key = lowercase(note_name)
             if haskey(note_index, key)
@@ -49,20 +53,33 @@ function transform_wikilinks(content::String, note_index::Dict, output_dir::Stri
         end
     )
 
-    # Simple wiki-links: [[note name]] and [[note#section]]
-    content = replace(content, r"\[\[([^\]]+)\]\]" =>
+    # Simple wiki-links: [[note name]], [[note#section]], [[#anchor]]
+    # Negative lookbehind avoids matching ![[...]] embeds (handled elsewhere)
+    content = replace(content, r"(?<!!)\[\[([^\]]+)\]\]" =>
         function(m)
             raw = match(r"\[\[([^\]]+)\]\]", m).captures[1]
-            # Strip section reference for URL lookup
-            note_name = strip(split(raw, "#")[1])
-            display_name = isempty(note_name) ? raw : note_name
+            parts = split(raw, "#", limit=2)
+            note_name = strip(parts[1])
+            section = length(parts) > 1 ? strip(parts[2]) : ""
+
+            # .base files have no standalone page — render as plain name
+            endswith(lowercase(note_name), ".base") && return note_name
+
+            # Anchor-only link: [[#Section Title]] → [Section Title](#section-title)
+            if isempty(note_name)
+                anchor = replace(replace(lowercase(section), r"\s+" => "-"), r"[^a-z0-9-]" => "")
+                return "[$section](#$anchor)"
+            end
+
             key = lowercase(note_name)
+            anchor_suffix = isempty(section) ? "" :
+                "#" * replace(replace(lowercase(section), r"\s+" => "-"), r"[^a-z0-9-]" => "")
             if haskey(note_index, key)
                 push!(edges, key)
-                "[$display_name]($(note_index[key]))"
+                "[$note_name]($(note_index[key])$anchor_suffix)"
             else
                 @warn "Unresolved wiki-link: [[$raw]]"
-                "$display_name"
+                "$note_name"
             end
         end
     )

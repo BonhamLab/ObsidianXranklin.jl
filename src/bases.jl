@@ -250,13 +250,13 @@ function process_base_embeds(content::String, vault_path::String,
                               notes::Vector{NoteInfo}, output_dir::String)
     replace(content, r"!\[\[([^\]]+\.base)\]\]" =>
         function(m)
-            base_name = match(r"!\[\[([^\]]+)\]\]", m).captures[1]
+            base_name = String(match(r"!\[\[([^\]]+)\]\]", m).captures[1])
             base_path = find_file_in_vault(vault_path, base_name)
             if base_path !== nothing
-                render_base_file(base_path, notes)
+                "~~~\n$(render_base_file(base_path, notes))\n~~~"
             else
                 @warn "Base file not found: $base_name"
-                "<p><em>Base not found: $base_name</em></p>"
+                "~~~\n<p><em>Base not found: $base_name</em></p>\n~~~"
             end
         end
     )

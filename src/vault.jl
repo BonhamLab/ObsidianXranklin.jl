@@ -123,14 +123,15 @@ function copy_vault_assets(vault_path::String, assets_dir::String)
             ext = lowercase(splitext(file)[2])
             ext in media_exts || continue
             src = joinpath(root, file)
-            dst = joinpath(assets_dir, file)
+            safe_name = replace(file, " " => "-")
+            dst = joinpath(assets_dir, safe_name)
             isfile(dst) || cp(src, dst)
         end
     end
 end
 
 """
-    sync_vault(vault_path, site_path; publish_folders, output_dir)
+    sync_vault(vault_path, site_path; publish_folders, output_dir, index_note)
 
 Main entry point. Discovers publishable notes in `vault_path`, transforms them
 (callouts → HTML, YAML → TOML, wiki-links → markdown), and writes them to
@@ -144,10 +145,15 @@ and copies media assets.
 - `site_path`: root of the Xranklin site (e.g., `"."`)
 - `publish_folders`: vault-relative folder prefixes whose notes are auto-published
 - `output_dir`: site subdirectory for published notes (default: `"notes"`)
+- `index_note`: slug of the note to use as the section homepage (`/<output_dir>/`).
+  When set, that note is also written to `<output_dir>/index.md` so that the
+  section root URL resolves directly to it. Corresponds to `obsidian_home` in
+  the site's `config.jl`.
 """
 function sync_vault(vault_path::String, site_path::String;
                     publish_folders::Vector{String}=String[],
-                    output_dir::String="notes")
+                    output_dir::String="notes",
+                    index_note::Union{String,Nothing}=nothing)
     vault_path = abspath(vault_path)
     site_path  = abspath(site_path)
     out_dir    = joinpath(site_path, output_dir)
@@ -188,16 +194,27 @@ function sync_vault(vault_path::String, site_path::String;
         write(joinpath(note_out, "index.md"), content)
     end
 
-    # 4. Copy vault media assets
+    # 4. Write section index if an index_note is configured
+    if index_note !== nothing
+        home = findfirst(n -> n.slug == index_note, notes)
+        if home !== nothing
+            cp(joinpath(out_dir, index_note, "index.md"),
+               joinpath(out_dir, "index.md"), force=true)
+        else
+            @warn "ObsidianXranklin: index_note \"$index_note\" not found among published notes"
+        end
+    end
+
+    # 5. Copy vault media assets
     copy_vault_assets(vault_path, assets_dir)
 
-    # 5. Write graph data JSON
+    # 6. Write graph data JSON
     graph_data = build_graph_data(notes, all_edges)
     open(joinpath(assets_dir, "graph_data.json"), "w") do io
         JSON3.write(io, graph_data)
     end
 
-    # 6. Copy graph-view.js to site assets
+    # 7. Copy graph-view.js to site assets
     js_src = joinpath(@__DIR__, "..", "assets", "graph-view.js")
     if isfile(js_src)
         cp(js_src, joinpath(assets_dir, "graph-view.js"), force=true)

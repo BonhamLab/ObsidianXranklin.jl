@@ -56,6 +56,7 @@ end
         @test occursin("callout-note", result)
         @test occursin("callout-title", result)
         @test occursin("This is the content.", result)
+        @test occursin("~~~", result)
     end
 
     @testset "callout with custom title" begin
@@ -104,7 +105,14 @@ end
     @testset "section wiki-link" begin
         content = "See [[published-note#section]] here."
         result, edges = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
-        @test occursin("/notes/published-note/", result)
+        @test occursin("/notes/published-note/#section", result)
+    end
+
+    @testset "anchor-only wiki-link" begin
+        content = "See [[#Tags and other metadata]] here."
+        result, edges = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
+        @test occursin("[Tags and other metadata](#tags-and-other-metadata)", result)
+        @test isempty(edges)
     end
 
     @testset "unresolved link becomes plain text" begin
@@ -117,7 +125,13 @@ end
     @testset "image embed" begin
         content = "![[photo.png]]"
         result, _ = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
-        @test occursin("![photo.png](/_assets/photo.png)", result)
+        @test occursin("![photo.png](/assets/photo.png)", result)
+    end
+
+    @testset "image embed with spaces in filename" begin
+        content = "![[Pasted image 20251022161331.png]]"
+        result, _ = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
+        @test occursin("![Pasted image 20251022161331.png](/assets/Pasted-image-20251022161331.png)", result)
     end
 end
 
@@ -213,5 +227,22 @@ end
         # Wiki-links were resolved
         @test occursin("[another note]", content)
         @test !occursin("[[", content)
+    end
+
+    # index_note writes the home note to notes/index.md
+    mktempdir() do site_dir
+        sync_vault(FIXTURE_VAULT, site_dir;
+                   publish_folders=String[], index_note="published-note")
+        @test isfile(joinpath(site_dir, "notes", "index.md"))
+        index_content = read(joinpath(site_dir, "notes", "index.md"), String)
+        slug_content   = read(joinpath(site_dir, "notes", "published-note", "index.md"), String)
+        @test index_content == slug_content
+    end
+
+    # unknown index_note warns but doesn't error
+    mktempdir() do site_dir
+        @test_logs (:warn, r"index_note") match_mode=:any sync_vault(
+            FIXTURE_VAULT, site_dir; publish_folders=String[], index_note="no-such-note")
+        @test !isfile(joinpath(site_dir, "notes", "index.md"))
     end
 end

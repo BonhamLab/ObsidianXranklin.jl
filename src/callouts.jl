@@ -75,9 +75,15 @@ function transform_callouts(content::String)
 
             body = join(body_lines, "\n")
 
+            write(result, "\n~~~\n")
             write(result, "<div class=\"callout callout-$callout_type\">\n")
             write(result, "<div class=\"callout-title\">$title</div>\n")
-            write(result, "<div class=\"callout-content\">\n\n$body\n\n</div></div>\n")
+            write(result, "<div class=\"callout-content\">\n")
+            write(result, "~~~\n")
+            write(result, "$body\n")
+            write(result, "~~~\n")
+            write(result, "</div>\n</div>\n")
+            write(result, "~~~\n")
         else
             write(result, line)
             write(result, "\n")
