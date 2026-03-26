@@ -53,17 +53,15 @@ end
     @testset "basic NOTE callout" begin
         content = "> [!NOTE]\n> This is the content.\n"
         result = ObsidianXranklin.transform_callouts(content)
-        @test occursin("callout-note", result)
-        @test occursin("callout-title", result)
+        @test occursin("{{callout note Note}}", result)
         @test occursin("This is the content.", result)
-        @test occursin("~~~", result)
+        @test occursin("{{end_callout}}", result)
     end
 
     @testset "callout with custom title" begin
         content = "> [!WARNING] Watch out!\n> Danger ahead.\n"
         result = ObsidianXranklin.transform_callouts(content)
-        @test occursin("callout-warning", result)
-        @test occursin("Watch out!", result)
+        @test occursin("{{callout warning Watch out!}}", result)
         @test occursin("Danger ahead.", result)
     end
 
@@ -78,6 +76,24 @@ end
         content = "> This is a plain blockquote.\n"
         result = ObsidianXranklin.transform_callouts(content)
         @test result == content
+    end
+
+    @testset "hfun_callout with explicit title" begin
+        html = ObsidianXranklin.hfun_callout(["warning", "Watch", "out!"])
+        @test occursin("callout-warning", html)
+        @test occursin("Watch out", html)  # ! is HTML-escaped by Hyperscript
+        @test occursin("callout-title", html)
+        @test occursin("callout-content", html)
+    end
+
+    @testset "hfun_callout default title" begin
+        html = ObsidianXranklin.hfun_callout(["note"])
+        @test occursin("callout-note", html)
+        @test occursin("Note", html)
+    end
+
+    @testset "hfun_end_callout" begin
+        @test ObsidianXranklin.hfun_end_callout() == "</div></div>"
     end
 end
 
@@ -125,13 +141,13 @@ end
     @testset "image embed" begin
         content = "![[photo.png]]"
         result, _ = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
-        @test occursin("![photo.png](/assets/photo.png)", result)
+        @test occursin("![photo.png](/assets/vault/photo.png)", result)
     end
 
     @testset "image embed with spaces in filename" begin
         content = "![[Pasted image 20251022161331.png]]"
         result, _ = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
-        @test occursin("![Pasted image 20251022161331.png](/assets/Pasted-image-20251022161331.png)", result)
+        @test occursin("![Pasted image 20251022161331.png](/assets/vault/Pasted-image-20251022161331.png)", result)
     end
 end
 
@@ -221,8 +237,10 @@ end
         @test startswith(content, "+++\n")
         @test !occursin("---", content[1:20])
 
-        # Callouts were converted
-        @test occursin("callout-note", content)
+        # Callouts were converted to hfun syntax
+        @test occursin("{{callout", content)
+        @test occursin("{{end_callout}}", content)
+        @test !occursin("> [!", content)
 
         # Wiki-links were resolved
         @test occursin("[another note]", content)

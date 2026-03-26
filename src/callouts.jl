@@ -32,7 +32,7 @@ const CALLOUT_DISPLAY_NAMES = Dict(
 """
     transform_callouts(content::String) -> String
 
-Transform Obsidian callout blocks (`> [!TYPE]`) into HTML div elements.
+Transform Obsidian callout blocks (`> [!TYPE]`) into `{{callout}}` hfun calls.
 Handles multi-line callouts and optional custom titles.
 
 Example:
@@ -41,11 +41,9 @@ Example:
 
 becomes:
 
-    <div class="callout callout-warning">
-    <div class="callout-title">Be careful</div>
-    <div class="callout-content">
+    {{callout warning Be careful}}
     This is the content.
-    </div></div>
+    {{end_callout}}
 """
 function transform_callouts(content::String)
     lines = split(content, "\n")
@@ -75,15 +73,9 @@ function transform_callouts(content::String)
 
             body = join(body_lines, "\n")
 
-            write(result, "\n~~~\n")
-            write(result, "<div class=\"callout callout-$callout_type\">\n")
-            write(result, "<div class=\"callout-title\">$title</div>\n")
-            write(result, "<div class=\"callout-content\">\n")
-            write(result, "~~~\n")
+            write(result, "{{callout $callout_type $title}}\n")
             write(result, "$body\n")
-            write(result, "~~~\n")
-            write(result, "</div>\n</div>\n")
-            write(result, "~~~\n")
+            write(result, "{{end_callout}}\n")
         else
             write(result, line)
             write(result, "\n")

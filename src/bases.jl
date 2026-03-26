@@ -27,7 +27,7 @@ function render_base_file(base_path::String, notes::Vector{NoteInfo})
         read(base_path, String)
     catch e
         @warn "Cannot read base file $base_path: $e"
-        return "<p><em>Base file unreadable: $(basename(base_path))</em></p>"
+        return string(node("p", node("em", "Base file unreadable: $(basename(base_path))")))
     end
 
     # Strip leading frontmatter from .base files (e.g. dg-publish)
@@ -37,11 +37,11 @@ function render_base_file(base_path::String, notes::Vector{NoteInfo})
         YAML.load(content)
     catch e
         @warn "Failed to parse .base file $base_path: $e"
-        return "<p><em>Failed to render base: $(basename(base_path))</em></p>"
+        return string(node("p", node("em", "Failed to render base: $(basename(base_path))")))
     end
 
     (config === nothing || !(config isa Dict)) &&
-        return "<p><em>Invalid or empty base file</em></p>"
+        return string(node("p", node("em", "Invalid or empty base file")))
 
     # Apply filters
     filter_expr = get(config, "filters", nothing)
@@ -124,7 +124,7 @@ Render a single table cell for `prop`, returning an HTML string.
 """
 function render_file_property_cell(note::NoteInfo, prop::AbstractString)
     if prop == "file.name"
-        return "<a href=\"/notes/$(note.slug)/\">$(note.title)</a>"
+        return node("a", href="/notes/$(note.slug)/", note.title)
     elseif prop == "file.tags" || prop == "tags"
         tags = prop == "tags" ? get(note.frontmatter, "tags", note.tags) : note.tags
         tags = tags isa AbstractVector ? string.(tags) : [string(tags)]
@@ -146,22 +146,19 @@ end
 Render a list of notes as an HTML `<table>` with the given column order.
 """
 function render_base_table(notes::Vector{NoteInfo}, columns)
-    io = IOBuffer()
-    write(io, "<table class=\"obsidian-base\">\n<thead>\n<tr>\n")
-    for col in columns
-        write(io, "  <th>$(column_header(string(col)))</th>\n")
-    end
-    write(io, "</tr>\n</thead>\n<tbody>\n")
-    for note in notes
-        write(io, "<tr>\n")
-        for col in columns
-            cell = render_file_property_cell(note, string(col))
-            write(io, "  <td>$cell</td>\n")
-        end
-        write(io, "</tr>\n")
-    end
-    write(io, "</tbody>\n</table>")
-    return String(take!(io))
+    cols = string.(columns)
+    return string(
+        node("table", class="obsidian-base",
+            node("thead",
+                node("tr", (node("th", column_header(c)) for c in cols)...)
+            ),
+            node("tbody",
+                (node("tr",
+                    (node("td", render_file_property_cell(note, c)) for c in cols)...
+                ) for note in notes)...
+            )
+        )
+    )
 end
 
 # ─── Filter expression parser ──────────────────────────────────────────────────

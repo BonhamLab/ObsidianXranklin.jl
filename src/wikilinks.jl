@@ -15,7 +15,7 @@ function transform_wikilinks(content::String, note_index::Dict, output_dir::Stri
             img = match(r"!\[\[([^\]]+)\]\]", m).captures[1]
             name = basename(img)
             safe_name = replace(name, " " => "-")
-            "![$name](/assets/$safe_name)"
+            "![$name](/assets/vault/$safe_name)"
         end
     )
 
@@ -48,7 +48,7 @@ function transform_wikilinks(content::String, note_index::Dict, output_dir::Stri
                 "[$alias]($(note_index[key]))"
             else
                 @warn "Unresolved wiki-link: [[$note_name|$alias]]"
-                "[$alias]"
+                "[$alias](#wikilink-missing)"
             end
         end
     )
@@ -79,7 +79,7 @@ function transform_wikilinks(content::String, note_index::Dict, output_dir::Stri
                 "[$note_name]($(note_index[key])$anchor_suffix)"
             else
                 @warn "Unresolved wiki-link: [[$raw]]"
-                "$note_name"
+                "[$note_name](#wikilink-missing)"
             end
         end
     )

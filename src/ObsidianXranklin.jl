@@ -31,9 +31,14 @@ Add `using ObsidianXranklin` to your site's `utils.jl`. This makes
 """
 module ObsidianXranklin
 
+export sync_vault, NoteInfo
+
 using YAML
 using JSON3
 using Dates
+import Hyperscript as HS
+
+const node = HS.m
 
 include("types.jl")
 include("frontmatter.jl")
@@ -42,7 +47,5 @@ include("wikilinks.jl")
 include("bases.jl")
 include("vault.jl")
 include("hfuns.jl")
-
-export sync_vault, NoteInfo
 
 end

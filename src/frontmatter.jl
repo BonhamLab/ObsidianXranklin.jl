@@ -6,17 +6,13 @@ Returns (frontmatter_dict, body_content).
 """
 function parse_frontmatter(content::String)
     m = match(r"^---\r?\n(.*?)\r?\n---\r?\n(.*)"s, content)
-    if m !== nothing
-        yaml_str = m.captures[1]
-        body = m.captures[2]
-        fm = try
-            YAML.load(yaml_str)
-        catch
-            nothing  # treat as no frontmatter if YAML is invalid
-        end
-        fm isa Dict && return (fm, body)
-    end
-    return (Dict(), content)
+    isnothing(m) && return (Dict(), content)
+
+    yaml_str = m.captures[1]
+    body = m.captures[2]
+    fm = YAML.load(yaml_str)
+
+    return (fm, body)
 end
 
 """
@@ -24,32 +20,31 @@ end
 
 Render a single key-value pair as a TOML line.
 """
-function toml_value(key::String, value)
-    if value isa Bool
-        return "$key = $value"
-    elseif value isa Integer
-        return "$key = $value"
-    elseif value isa AbstractFloat
-        return "$key = $value"
-    elseif value isa Dates.Date
-        y, m, d = Dates.year(value), Dates.month(value), Dates.day(value)
-        return "$key = Date($y, $m, $d)"
-    elseif value isa String
-        # Detect YYYY-MM-DD date strings
-        if occursin(r"^\d{4}-\d{2}-\d{2}$", value)
-            d = Dates.Date(value)
-            y, mo, dy = Dates.year(d), Dates.month(d), Dates.day(d)
-            return "$key = Date($y, $mo, $dy)"
-        end
-        escaped = replace(value, "\\" => "\\\\", "\"" => "\\\"")
-        return "$key = \"$escaped\""
-    elseif value isa AbstractVector
-        items = join(["\"$(replace(string(v), "\\" => "\\\\", "\"" => "\\\""))\"" for v in value], ", ")
-        return "$key = [$items]"
-    else
-        escaped = replace(string(value), "\\" => "\\\\", "\"" => "\\\"")
-        return "$key = \"$escaped\""
+toml_value(key::String, value::Union{Integer, AbstractFloat}) = "$key = $value"
+
+function toml_value(key::String, value::Dates.Date)
+    y, m, d = Dates.year(value), Dates.month(value), Dates.day(value)
+    return "$key = Date($y, $m, $d)"
+end
+
+function toml_value(key::String, value::String)
+    if occursin(r"^\d{4}-\d{2}-\d{2}$", value)
+        d = Dates.Date(value)
+        y, m, dy = Dates.year(d), Dates.month(d), Dates.day(d)
+        return "$key = Date($y, $m, $dy)"
     end
+    escaped = replace(value, "\\" => "\\\\", "\"" => "\\\"")
+    return "$key = \"$escaped\""
+end
+
+function toml_value(key::String, value::AbstractVector)
+    items = join(["\"$(replace(string(v), "\\" => "\\\\", "\"" => "\\\""))\"" for v in value], ", ")
+    return "$key = [$items]"
+end
+
+function toml_value(key::String, value)
+    escaped = replace(string(value), "\\" => "\\\\", "\"" => "\\\"")
+    return "$key = \"$escaped\""
 end
 
 # Keys that are Obsidian-internal and should be omitted from Xranklin TOML
@@ -78,9 +73,7 @@ If no frontmatter is found, returns (content, Dict()).
 function convert_frontmatter(content::String)
     fm, body = parse_frontmatter(content)
 
-    if isempty(fm)
-        return content, fm
-    end
+    isempty(fm) && return content, fm
 
     lines = String[]
     for (k, v) in fm
@@ -88,10 +81,12 @@ function convert_frontmatter(content::String)
         push!(lines, toml_value(string(k), v))
     end
 
-    if has_date_values(fm)
-        pushfirst!(lines, "using Dates")
-    end
+    has_date_values(fm) && pushfirst!(lines, "using Dates")
 
     toml_block = join(lines, "\n")
-    return "+++\n$toml_block\n+++\n$body", fm
+    return """
+    +++
+    $toml_block
+    +++
+    $body""", fm
 end

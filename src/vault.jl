@@ -157,10 +157,11 @@ function sync_vault(vault_path::String, site_path::String;
     vault_path = abspath(vault_path)
     site_path  = abspath(site_path)
     out_dir    = joinpath(site_path, output_dir)
-    assets_dir = joinpath(site_path, "_assets")
+    assets_dir      = joinpath(site_path, "_assets")
+    vault_assets_dir = joinpath(assets_dir, "vault")
 
     mkpath(out_dir)
-    mkpath(assets_dir)
+    mkpath(vault_assets_dir)
 
     # 1. Discover publishable notes
     notes = discover_notes(vault_path, publish_folders)
@@ -206,7 +207,7 @@ function sync_vault(vault_path::String, site_path::String;
     end
 
     # 5. Copy vault media assets
-    copy_vault_assets(vault_path, assets_dir)
+    copy_vault_assets(vault_path, vault_assets_dir)
 
     # 6. Write graph data JSON
     graph_data = build_graph_data(notes, all_edges)
