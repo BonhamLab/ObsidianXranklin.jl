@@ -53,15 +53,18 @@ end
     @testset "basic NOTE callout" begin
         content = "> [!NOTE]\n> This is the content.\n"
         result = ObsidianXranklin.transform_callouts(content)
-        @test occursin("{{callout note Note}}", result)
+        @test occursin("callout-note", result)
+        @test occursin("callout-title", result)
+        @test occursin("Note", result)
         @test occursin("This is the content.", result)
-        @test occursin("{{end_callout}}", result)
+        @test occursin("~~~", result)
     end
 
     @testset "callout with custom title" begin
         content = "> [!WARNING] Watch out!\n> Danger ahead.\n"
         result = ObsidianXranklin.transform_callouts(content)
-        @test occursin("{{callout warning Watch out!}}", result)
+        @test occursin("callout-warning", result)
+        @test occursin("Watch out!", result)
         @test occursin("Danger ahead.", result)
     end
 
@@ -148,6 +151,20 @@ end
         content = "![[Pasted image 20251022161331.png]]"
         result, _ = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
         @test occursin("![Pasted image 20251022161331.png](/assets/vault/Pasted-image-20251022161331.png)", result)
+    end
+
+    @testset "wikilink inside inline code is not transformed" begin
+        content = "Use `[[published-note]]` as an example."
+        result, edges = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
+        @test occursin("`[[published-note]]`", result)
+        @test isempty(edges)
+    end
+
+    @testset "wikilink inside fenced code block is not transformed" begin
+        content = "```\n[[published-note]]\n```"
+        result, edges = ObsidianXranklin.transform_wikilinks(content, note_index, "notes")
+        @test occursin("[[published-note]]", result)
+        @test isempty(edges)
     end
 end
 
@@ -450,9 +467,10 @@ end
         @test startswith(content, "+++\n")
         @test !occursin("---", content[1:20])
 
-        # Callouts were converted to hfun syntax
-        @test occursin("{{callout", content)
-        @test occursin("{{end_callout}}", content)
+        # Callouts were converted to ~~~ raw HTML blocks
+        @test occursin("callout-note", content)
+        @test occursin("callout-content", content)
+        @test occursin("~~~", content)
         @test !occursin("> [!", content)
 
         # Wiki-links were resolved

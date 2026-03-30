@@ -8,6 +8,22 @@ Returns (transformed_content, vector_of_linked_slugs).
 function transform_wikilinks(content::String, note_index::Dict, output_dir::String)
     edges = String[]
 
+    # ── Protect code from wikilink transformation ────────────────────────────
+    # Placeholders use control characters unlikely to appear in Markdown.
+    protected = Dict{String,String}()
+    counter = Ref(0)
+    function protect(s)
+        k = "\x02P$(counter[])\x02"
+        counter[] += 1
+        protected[k] = s
+        return k
+    end
+
+    # Fenced code blocks (``` only — ~~~ is used by Xranklin for raw HTML)
+    content = replace(content, r"(?ms)^```[^\n]*\n.*?^```[ \t]*$" => protect)
+    # Inline code spans (single backtick, no newlines inside)
+    content = replace(content, r"`[^`\n]+`" => protect)
+
     # Image/file embeds: ![[image.ext]] → ![image](/assets/image.ext)
     # Must run before note embed pattern
     content = replace(content, r"!\[\[([^\]\|]+\.(png|jpg|jpeg|gif|svg|webp|pdf))\]\]"i =>
@@ -83,6 +99,11 @@ function transform_wikilinks(content::String, note_index::Dict, output_dir::Stri
             end
         end
     )
+
+    # ── Restore protected code ───────────────────────────────────────────────
+    for (k, v) in protected
+        content = replace(content, k => v)
+    end
 
     return content, unique(edges)
 end

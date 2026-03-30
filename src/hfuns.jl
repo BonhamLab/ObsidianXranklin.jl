@@ -1,7 +1,8 @@
 """
     hfun_callout(params::Vector{String}) -> String
 
-Xranklin template function. Opens a callout block.
+Xranklin template function for manually writing callouts in site pages.
+(Vault notes use `~~~` raw HTML blocks instead — see `transform_callouts`.)
 
 Usage in a page:
     {{callout note My Title}}

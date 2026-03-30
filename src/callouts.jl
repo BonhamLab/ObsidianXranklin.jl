@@ -1,3 +1,34 @@
+# Emoji icon for each callout type
+const CALLOUT_ICONS = Dict(
+    "note"       => "📝",
+    "abstract"   => "📋",
+    "summary"    => "📋",
+    "tldr"       => "📋",
+    "info"       => "ℹ️",
+    "todo"       => "☑️",
+    "tip"        => "💡",
+    "hint"       => "💡",
+    "important"  => "❗",
+    "success"    => "✅",
+    "check"      => "✅",
+    "done"       => "✅",
+    "question"   => "❓",
+    "help"       => "❓",
+    "faq"        => "❓",
+    "warning"    => "⚠️",
+    "caution"    => "⚠️",
+    "attention"  => "⚠️",
+    "failure"    => "❌",
+    "fail"       => "❌",
+    "missing"    => "❌",
+    "danger"     => "⚡",
+    "error"      => "⚡",
+    "bug"        => "🐛",
+    "example"    => "📌",
+    "quote"      => "💬",
+    "cite"       => "💬",
+)
+
 # Obsidian callout type display names
 const CALLOUT_DISPLAY_NAMES = Dict(
     "note"       => "Note",
@@ -32,8 +63,9 @@ const CALLOUT_DISPLAY_NAMES = Dict(
 """
     transform_callouts(content::String) -> String
 
-Transform Obsidian callout blocks (`> [!TYPE]`) into `{{callout}}` hfun calls.
-Handles multi-line callouts and optional custom titles.
+Transform Obsidian callout blocks (`> [!TYPE]`) into Xranklin `~~~` raw HTML
+blocks. The opening and closing div tags are emitted as raw HTML; the body
+content sits between them and is processed as normal Markdown by Xranklin.
 
 Example:
     > [!WARNING] Be careful
@@ -41,9 +73,13 @@ Example:
 
 becomes:
 
-    {{callout warning Be careful}}
+    ~~~
+    <div class="callout callout-warning"><div class="callout-title">Be careful</div><div class="callout-content">
+    ~~~
     This is the content.
-    {{end_callout}}
+    ~~~
+    </div></div>
+    ~~~
 """
 function transform_callouts(content::String)
     lines = split(content, "\n")
@@ -61,6 +97,8 @@ function transform_callouts(content::String)
             title = isempty(title_override) ?
                 get(CALLOUT_DISPLAY_NAMES, callout_type, titlecase(callout_type)) :
                 title_override
+            title_html = replace(title, "&" => "&amp;", "<" => "&lt;", ">" => "&gt;")
+            icon = get(CALLOUT_ICONS, callout_type, "ℹ️")
 
             # Collect continuation lines (those starting with "> ")
             body_lines = String[]
@@ -73,9 +111,11 @@ function transform_callouts(content::String)
 
             body = join(body_lines, "\n")
 
-            write(result, "{{callout $callout_type $title}}\n")
+            write(result, "~~~\n<div class=\"callout callout-$callout_type\">")
+            write(result, "<div class=\"callout-title\">$icon $title_html</div>")
+            write(result, "<div class=\"callout-content\">\n~~~\n")
             write(result, "$body\n")
-            write(result, "{{end_callout}}\n")
+            write(result, "~~~\n</div></div>\n~~~\n")
         else
             write(result, line)
             write(result, "\n")
