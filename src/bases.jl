@@ -22,23 +22,16 @@
 
 Parse an Obsidian Bases `.base` file and render its first table view as HTML.
 """
-function render_base_file(base_path::String, notes::Vector{NoteInfo})
-    content = try
-        read(base_path, String)
-    catch e
-        @warn "Cannot read base file $base_path: $e"
+function render_base_file(base_path::String, notes::Vector{NoteInfo}, vault_root::String="")
+    isfile(base_path) ||
         return string(node("p", node("em", "Base file unreadable: $(basename(base_path))")))
-    end
+
+    content = read(base_path, String)
 
     # Strip leading frontmatter from .base files (e.g. dg-publish)
     content = strip_base_frontmatter(content)
 
-    config = try
-        YAML.load(content)
-    catch e
-        @warn "Failed to parse .base file $base_path: $e"
-        return string(node("p", node("em", "Failed to render base: $(basename(base_path))")))
-    end
+    config = YAML.load(content)
 
     (config === nothing || !(config isa Dict)) &&
         return string(node("p", node("em", "Invalid or empty base file")))
@@ -70,7 +63,7 @@ function render_base_file(base_path::String, notes::Vector{NoteInfo})
         end
     end
 
-    render_base_table(filtered, columns)
+    render_base_table(filtered, columns, vault_root)
 end
 
 """Strip any leading `key: value` lines (frontmatter-style) from a .base file."""
@@ -122,13 +115,26 @@ end
 
 Render a single table cell for `prop`, returning an HTML string.
 """
-function render_file_property_cell(note::NoteInfo, prop::AbstractString)
+function render_file_property_cell(note::NoteInfo, prop::AbstractString, vault_root::String="")
     if prop == "file.name"
-        return node("a", href="/notes/$(note.slug)/", note.title)
+        return note.published ?
+            node("a", href="/notes/$(note.slug)/", note.title) :
+            note.title
+    elseif prop == "file.mtime"
+        mtime = stat(note.src_path).mtime
+        return Base.Libc.strftime("%b %d, %Y %H:%M", round(Int, mtime))
+    elseif prop == "file.folder"
+        folder = dirname(note.src_path)
+        if !isempty(vault_root)
+            rel = relpath(folder, vault_root)
+            folder = rel == "." ? "/" : "/" * rel * "/"
+        end
+        return folder
     elseif prop == "file.tags" || prop == "tags"
         tags = prop == "tags" ? get(note.frontmatter, "tags", note.tags) : note.tags
         tags = tags isa AbstractVector ? string.(tags) : [string(tags)]
-        return join(tags, ", ")
+        return node("span", class="note-tags",
+            (node("span", class="note-tag", t) for t in tags)...)
     else
         return string(get_file_property(note, prop))
     end
@@ -137,6 +143,7 @@ end
 """Pretty-print a column header from a `file.*` property name."""
 function column_header(prop::AbstractString)
     prop = replace(prop, "file." => "")
+    prop = get(Dict("mtime" => "Modified", "ctime" => "Created"), prop, prop)
     return titlecase(replace(prop, r"[-_]" => " "))
 end
 
@@ -145,7 +152,7 @@ end
 
 Render a list of notes as an HTML `<table>` with the given column order.
 """
-function render_base_table(notes::Vector{NoteInfo}, columns)
+function render_base_table(notes::Vector{NoteInfo}, columns, vault_root::String="")
     cols = string.(columns)
     return string(
         node("table", class="obsidian-base",
@@ -154,7 +161,7 @@ function render_base_table(notes::Vector{NoteInfo}, columns)
             ),
             node("tbody",
                 (node("tr",
-                    (node("td", render_file_property_cell(note, c)) for c in cols)...
+                    (node("td", render_file_property_cell(note, c, vault_root)) for c in cols)...
                 ) for note in notes)...
             )
         )
@@ -171,33 +178,20 @@ Supports: `and`, `or` lists; equality `field == "value"`;
 `file.tags.contains("tag")` and `file.folder.contains("path")`.
 """
 function filter_notes_for_base(notes::Vector{NoteInfo}, filter_expr)
-    filter_expr === nothing && return copy(notes)
     return filter(n -> eval_filter(n, filter_expr), notes)
 end
 
-function eval_filter(note::NoteInfo, expr)
-    expr === nothing && return true
+eval_filter(note::NoteInfo, ::Nothing) = true
 
-    if expr isa Dict
-        if haskey(expr, "and")
-            return all(e -> eval_filter(note, e), expr["and"])
-        elseif haskey(expr, "or")
-            return any(e -> eval_filter(note, e), expr["or"])
-        elseif haskey(expr, "not")
-            return !eval_filter(note, expr["not"])
-        end
-    end
-
-    if expr isa String
-        return eval_filter_string(note, expr)
-    end
-
-    if expr isa AbstractVector
-        return all(e -> eval_filter(note, e), expr)
-    end
-
+function eval_filter(note::NoteInfo, expr::Dict)
+    haskey(expr, "and") && return all(e -> eval_filter(note, e), expr["and"])
+    haskey(expr, "or")  && return any(e -> eval_filter(note, e), expr["or"])
+    haskey(expr, "not") && return !eval_filter(note, expr["not"])
     return true
 end
+
+eval_filter(note::NoteInfo, expr::String)         = eval_filter_string(note, expr)
+eval_filter(note::NoteInfo, expr::AbstractVector) = all(e -> eval_filter(note, e), expr)
 
 function eval_filter_string(note::NoteInfo, expr::String)
     expr = strip(expr)
@@ -239,30 +233,24 @@ end
 # ─── Embed handling ────────────────────────────────────────────────────────────
 
 """
-    process_base_embeds(content, vault_path, notes, output_dir) -> String
+    process_base_embeds(content, vault_files, notes, output_dir) -> String
 
 Replace `![[name.base]]` inline embeds with rendered HTML tables.
+`vault_files` is a pre-built filename → absolute path index from `index_vault_files`.
 """
-function process_base_embeds(content::String, vault_path::String,
-                              notes::Vector{NoteInfo}, output_dir::String)
+function process_base_embeds(content::String, vault_files::Dict{String,String},
+                              notes::Vector{NoteInfo}, output_dir::String,
+                              vault_root::String="")
     replace(content, r"!\[\[([^\]]+\.base)\]\]" =>
         function(m)
             base_name = String(match(r"!\[\[([^\]]+)\]\]", m).captures[1])
-            base_path = find_file_in_vault(vault_path, base_name)
+            base_path = get(vault_files, base_name, nothing)
             if base_path !== nothing
-                "~~~\n$(render_base_file(base_path, notes))\n~~~"
+                "~~~\n$(render_base_file(base_path, notes, vault_root))\n~~~"
             else
                 @warn "Base file not found: $base_name"
                 "~~~\n<p><em>Base not found: $base_name</em></p>\n~~~"
             end
         end
     )
-end
-
-function find_file_in_vault(vault_path::String, filename::String)
-    for (root, dirs, files) in walkdir(vault_path)
-        filter!(d -> !startswith(d, "."), dirs)
-        filename in files && return joinpath(root, filename)
-    end
-    return nothing
 end

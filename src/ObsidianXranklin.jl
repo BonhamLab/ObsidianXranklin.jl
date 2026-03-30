@@ -31,7 +31,7 @@ Add `using ObsidianXranklin` to your site's `utils.jl`. This makes
 """
 module ObsidianXranklin
 
-export sync_vault, NoteInfo
+export sync_vault, watch_vault, NoteInfo
 
 using YAML
 using JSON3

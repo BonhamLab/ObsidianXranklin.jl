@@ -179,15 +179,110 @@ end
     @testset "discover_notes from fixtures" begin
         notes = ObsidianXranklin.discover_notes(FIXTURE_VAULT, String[])
         titles = [n.title for n in notes]
+        # All notes are indexed regardless of publish status
         @test "My Published Note" in titles
         @test "Another Note" in titles
-        @test !("Private Note" in titles)
+        @test "Private Note" in titles
+        # Templates/ is skipped by default — template note absent
+        @test !("Sample Template" in titles)
+        # published flag is set correctly
+        @test filter(n -> n.title == "My Published Note", notes)[1].published
+        @test !filter(n -> n.title == "Private Note", notes)[1].published
     end
 
     @testset "discover_notes with publish_folder" begin
-        # folder-published.md has no frontmatter publish key
-        notes = ObsidianXranklin.discover_notes(FIXTURE_VAULT, [""]) # all notes
-        @test length(notes) >= 3
+        # [""] matches all paths; publish: false in frontmatter still overrides
+        notes = ObsidianXranklin.discover_notes(FIXTURE_VAULT, [""])
+        @test count(n -> n.published, notes) == length(notes) - 1  # all except private-note
+        @test !filter(n -> n.title == "Private Note", notes)[1].published
+    end
+
+    @testset "raw note: discover_notes finds template with raw=true" begin
+        # Skip nothing so Templates/ is included; YAML parse fails on Templater syntax
+        notes = ObsidianXranklin.discover_notes(FIXTURE_VAULT, String[];
+                                                skip_folders=String[])
+        template_notes = filter(n -> n.title == "Sample Template", notes)
+        @test length(template_notes) == 1
+        t = template_notes[1]
+        @test t.published == true
+        @test t.raw == true
+        @test isempty(t.frontmatter)
+    end
+end
+
+# ─── read_site_config ─────────────────────────────────────────────────────────
+
+@testset "read_site_config" begin
+    mktempdir() do dir
+        @testset "reads defined variable" begin
+            write(joinpath(dir, "config.jl"), "my_var = [\"Templates/\", \"Drafts/\"]\n")
+            result = ObsidianXranklin.read_site_config(dir, "my_var", String[])
+            @test result == ["Templates/", "Drafts/"]
+        end
+
+        @testset "returns fallback when variable not defined" begin
+            write(joinpath(dir, "config.jl"), "other_var = 42\n")
+            result = ObsidianXranklin.read_site_config(dir, "my_var", ["default/"])
+            @test result == ["default/"]
+        end
+
+        @testset "returns fallback when config.jl missing" begin
+            result = ObsidianXranklin.read_site_config(joinpath(dir, "no-such-dir"),
+                                                        "my_var", ["fallback/"])
+            @test result == ["fallback/"]
+        end
+
+        @testset "returns fallback and warns when include errors" begin
+            write(joinpath(dir, "config.jl"), "syntax error !!! @@\n")
+            result = @test_logs (:warn, r"config\.jl") match_mode=:any begin
+                ObsidianXranklin.read_site_config(dir, "my_var", ["default/"])
+            end
+            @test result == ["default/"]
+        end
+    end
+
+    @testset "sync_vault reads vault_skip_folders from config.jl" begin
+        mktempdir() do site_dir
+            # Write a config.jl that skips nothing (empty list)
+            write(joinpath(site_dir, "config.jl"), "vault_skip_folders = String[]\n")
+            # With no skip_folders, the template note should be published as raw
+            notes = sync_vault(FIXTURE_VAULT, site_dir; publish_folders=String[])
+            template_found = any(n -> n.title == "Sample Template", notes)
+            @test template_found
+            slug = ObsidianXranklin.note_slug("sample-template.md")
+            @test isfile(joinpath(site_dir, "notes", slug, "index.md"))
+        end
+    end
+end
+
+# ─── raw_publish_flag ─────────────────────────────────────────────────────────
+
+@testset "raw_publish_flag" begin
+    @testset "detects publish: true in valid YAML block" begin
+        content = "---\ntitle: Test\npublish: true\n---\nBody.\n"
+        @test ObsidianXranklin.raw_publish_flag(content)
+    end
+
+    @testset "returns false when publish: false" begin
+        content = "---\ntitle: Test\npublish: false\n---\nBody.\n"
+        @test !ObsidianXranklin.raw_publish_flag(content)
+    end
+
+    @testset "returns false when publish key absent" begin
+        content = "---\ntitle: Test\n---\nBody.\n"
+        @test !ObsidianXranklin.raw_publish_flag(content)
+    end
+
+    @testset "returns false when no frontmatter" begin
+        content = "# Just a heading\n\nNo frontmatter.\n"
+        @test !ObsidianXranklin.raw_publish_flag(content)
+    end
+
+    @testset "detects publish: true despite invalid YAML elsewhere in block" begin
+        # Unquoted colon in value makes this unparseable by YAML but raw_publish_flag
+        # should still find publish: true via regex
+        content = "---\ntitle: Sample\npublish: true\ncreated_by: <user: kevin>\n---\nBody.\n"
+        @test ObsidianXranklin.raw_publish_flag(content)
     end
 end
 
@@ -212,6 +307,124 @@ end
         filtered = ObsidianXranklin.filter_notes_for_base(notes, expr)
         titles = [n.title for n in filtered]
         @test "My Published Note" in titles
+    end
+end
+
+# ─── vault_mtimes and watch_vault ─────────────────────────────────────────────
+
+@testset "vault_mtimes" begin
+    @testset "returns non-empty dict for fixture vault" begin
+        mtimes = ObsidianXranklin.vault_mtimes(FIXTURE_VAULT)
+        @test !isempty(mtimes)
+        # All values are positive floats (Unix timestamps)
+        @test all(v > 0.0 for v in values(mtimes))
+    end
+
+    @testset "includes .md files" begin
+        mtimes = ObsidianXranklin.vault_mtimes(FIXTURE_VAULT)
+        keys_set = Set(keys(mtimes))
+        @test any(endswith(k, ".md") for k in keys_set)
+    end
+
+    @testset "includes media assets" begin
+        mtimes = ObsidianXranklin.vault_mtimes(FIXTURE_VAULT)
+        @test any(endswith(k, ".png") for k in keys(mtimes))
+    end
+
+    @testset "skips hidden directories" begin
+        mktempdir() do vault_dir
+            hidden = joinpath(vault_dir, ".obsidian")
+            mkpath(hidden)
+            write(joinpath(hidden, "config.md"), "# hidden\n")
+            write(joinpath(vault_dir, "visible.md"), "# visible\n")
+            mtimes = ObsidianXranklin.vault_mtimes(vault_dir)
+            @test haskey(mtimes, "visible.md")
+            @test !any(startswith(k, ".obsidian") for k in keys(mtimes))
+        end
+    end
+
+    @testset "respects skip_folders" begin
+        mtimes = ObsidianXranklin.vault_mtimes(FIXTURE_VAULT; skip_folders=["Templates/"])
+        @test !any(startswith(k, "Templates") for k in keys(mtimes))
+    end
+end
+
+@testset "watch_vault" begin
+    @testset "returns a Task" begin
+        mktempdir() do site_dir
+            task = watch_vault(FIXTURE_VAULT, site_dir;
+                               interval=60,
+                               publish_folders=String[])
+            @test task isa Task
+            # Stop the watcher via the cooperative stop flag
+            ObsidianXranklin.stop_watcher()
+            yield()
+        end
+    end
+
+    @testset "initial sync runs before returning" begin
+        mktempdir() do site_dir
+            task = watch_vault(FIXTURE_VAULT, site_dir;
+                               interval=60,
+                               publish_folders=String[])
+            ObsidianXranklin.stop_watcher()
+            yield()
+            # The initial sync must have created output before watch_vault returned
+            @test isfile(joinpath(site_dir, "notes", "published-note", "index.md"))
+        end
+    end
+
+    @testset "detects new file and re-syncs" begin
+        mktempdir() do vault_dir
+            mktempdir() do site_dir
+                # Populate vault with a published note
+                write(joinpath(vault_dir, "note-one.md"),
+                      "---\ntitle: Note One\npublish: true\n---\n\nFirst note.\n")
+
+                task = watch_vault(vault_dir, site_dir;
+                                   interval=0.1,
+                                   publish_folders=String[],
+                                   skip_folders=String[])
+
+                # Verify initial sync produced output
+                @test isfile(joinpath(site_dir, "notes", "note-one", "index.md"))
+
+                # Add a second note to the vault
+                write(joinpath(vault_dir, "note-two.md"),
+                      "---\ntitle: Note Two\npublish: true\n---\n\nSecond note.\n")
+
+                # Wait long enough for at least two poll cycles (interval=0.1 s).
+                # We yield here to let the @async task actually run; sleep yields
+                # control to the Julia scheduler automatically.
+                sleep(0.5)
+
+                ObsidianXranklin.stop_watcher()
+                yield()
+
+                # The watcher must have picked up note-two and re-synced
+                @test isfile(joinpath(site_dir, "notes", "note-two", "index.md"))
+            end
+        end
+    end
+
+    @testset "second call stops old task" begin
+        mktempdir() do site_dir
+            task1 = watch_vault(FIXTURE_VAULT, site_dir;
+                                interval=60,
+                                publish_folders=String[])
+            # Second call sets task1's stop flag and starts a new task
+            task2 = watch_vault(FIXTURE_VAULT, site_dir;
+                                interval=60,
+                                publish_folders=String[])
+            # Yield so task1 can observe its stop flag and exit
+            yield()
+            sleep(0.05)
+            @test istaskdone(task1)
+            # task2 is still running (stop flag belongs to task2 now)
+            @test !istaskdone(task2)
+            ObsidianXranklin.stop_watcher()
+            yield()
+        end
     end
 end
 
@@ -262,5 +475,22 @@ end
         @test_logs (:warn, r"index_note") match_mode=:any sync_vault(
             FIXTURE_VAULT, site_dir; publish_folders=String[], index_note="no-such-note")
         @test !isfile(joinpath(site_dir, "notes", "index.md"))
+    end
+
+    # raw note: published as plaintext fenced code block
+    mktempdir() do site_dir
+        notes = sync_vault(FIXTURE_VAULT, site_dir;
+                           publish_folders=String[], skip_folders=String[])
+        slug = ObsidianXranklin.note_slug("sample-template.md")
+        out_path = joinpath(site_dir, "notes", slug, "index.md")
+        @test isfile(out_path)
+        content = read(out_path, String)
+        @test startswith(content, "+++\n")
+        @test occursin("title = \"Sample Template\"", content)
+        @test occursin("~~~plaintext", content)
+        # Raw body content is present verbatim
+        @test occursin("Template body content goes here.", content)
+        # Closing fence is present
+        @test occursin("~~~\n", content)
     end
 end

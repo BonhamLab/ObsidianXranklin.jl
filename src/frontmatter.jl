@@ -10,9 +10,37 @@ function parse_frontmatter(content::String)
 
     yaml_str = m.captures[1]
     body = m.captures[2]
-    fm = YAML.load(yaml_str)
+
+    fm = try
+        YAML.load(yaml_str)
+    catch e
+        @warn "ObsidianXranklin: failed to parse YAML frontmatter" exception=e
+        Dict()
+    end
+    isnothing(fm) && return (Dict(), body)
 
     return (fm, body)
+end
+
+"""
+    raw_publish_flag(content::String) -> Bool
+
+Check whether `publish: true` appears in the YAML frontmatter block of `content`
+without invoking the YAML parser. This is used as a fallback when YAML parsing
+fails (e.g. due to Obsidian Templater syntax such as `<%* ... -%>`).
+
+Returns `true` only when:
+1. `content` starts with `---` (has a YAML block), and
+2. a line matching `publish: true` (with optional surrounding whitespace) exists
+   within that block.
+"""
+function raw_publish_flag(content::String)
+    startswith(content, "---") || return false
+    # Find the closing --- after the opening one
+    m = match(r"^---\r?\n(.*?)\r?\n---"s, content)
+    isnothing(m) && return false
+    yaml_block = m.captures[1]
+    return occursin(r"(?m)^\s*publish:\s*true\s*$", yaml_block)
 end
 
 """
