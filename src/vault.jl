@@ -200,9 +200,10 @@ function copy_vault_assets(vault_path::String, assets_dir::String)
             ext = lowercase(splitext(file)[2])
             ext in media_exts || continue
             src = joinpath(root, file)
+            isfile(src) || continue  # skip broken symlinks pointing outside vault
             safe_name = replace(file, " " => "-")
             dst = joinpath(assets_dir, safe_name)
-            isfile(dst) || cp(src, dst)
+            ispath(dst) || cp(src, dst)
         end
     end
 end
