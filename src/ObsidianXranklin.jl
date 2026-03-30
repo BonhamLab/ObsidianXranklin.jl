@@ -32,6 +32,7 @@ Add `using ObsidianXranklin` to your site's `utils.jl`. This makes
 module ObsidianXranklin
 
 export sync_vault, watch_vault, NoteInfo
+export hfun_callout, hfun_end_callout, hfun_obsidian_graph
 
 using YAML
 using JSON3

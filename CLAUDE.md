@@ -79,6 +79,7 @@ Unresolved `[[links]]` become `[text](#wikilink-missing)` and emit a `@warn`. Im
 - Guard clauses use short-circuit `&&` rather than `if/end`: `isnothing(x) && return default`
 - Type-based branching uses multiple dispatch (separate method signatures), not `isa` chains inside a single function body. Use abstract supertypes in signatures (`Integer`, not `Int`; `Union{Bool, Integer, AbstractFloat}` for numerics)
 - Triple-quoted heredocs are fine for multi-line string construction; Julia strips the leading newline and common indentation automatically
+- Use `ispath(dst)` (not `isfile(dst)`) when guarding before `cp`. `isfile` returns `false` for broken symlinks (e.g. Zotero-managed files that exist locally but not in CI), so the guard silently fails and `cp` crashes with `EEXIST` when trying to recreate the symlink at `dst`.
 
 ### Test Fixtures
 `test/fixtures/vault/` contains representative notes: `published-note.md` (publish: true, has links/callouts), `private-note.md` (publish: false), `folder-published.md` (no frontmatter, covered by folder rule), `another-note.md` (link target), `sample.base` (Bases view).
